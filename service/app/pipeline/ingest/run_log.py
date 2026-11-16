@@ -86,7 +86,20 @@ class RunLog:
 
 
     def update_tenant(self, run_id: str, tenant_id: str) -> None:
+        """
+        Runs start under a tenant hint (usually "UNKNOWN") and are moved to the real tenant once the
+        check-in row is loaded. If another run already owns (tenant, event_type, primary_id) -- a retried
+        webhook, or the same event arriving from a second source -- the unique index rejects the move.
+        That is not an error for this run: keep its row under the hint tenant and carry on, instead of
+        aborting the whole event (which used to drop the reply).
+        """
         sql = "UPDATE ai_runs SET tenant_id=%s WHERE run_id=%s;"
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (tenant_id, run_id))
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (tenant_id, run_id))
+        except errors.UniqueViolation:
+            logger.warning(
+                "update_tenant skipped: another run already owns this key. run_id=%s tenant_id=%s",
+                run_id, tenant_id,
+            )

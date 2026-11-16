@@ -61,6 +61,20 @@ class DBTool:
             with conn.cursor() as cur:
                 cur.execute(q, (run_id, artifact_type, url, json.dumps(meta or {})))
 
+    def has_ai_reply_for_checkin(self, checkin_id: str) -> bool:
+        """True if writeback already recorded an AI reply for this check-in (artifact AI_REPLY_GROUNDED)."""
+        q = """
+        SELECT 1
+        FROM artifacts
+        WHERE artifact_type = 'AI_REPLY_GROUNDED'
+          AND COALESCE(meta->>'checkin_id','') = %s
+        LIMIT 1
+        """
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(q, (checkin_id,))
+                return cur.fetchone() is not None
+
     def insert_artifact_no_fail(
         self,
         *,

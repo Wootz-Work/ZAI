@@ -166,13 +166,34 @@ def _scoped_primary_id_for_run(payload: Dict[str, Any], *, event_type: str, prim
     ingest_only = _truthy(m.get("ingest_only") or m.get("skip_reply") or m.get("skip_ai_reply"))
     media_only = _truthy(m.get("media_only"))
 
+    # Events pushed straight from wootzcheckin are ingest-only (see run_event_graph) and arrive in addition to
+    # the AppSheet/Sheets event for the same check-in or comment. Give them their own key so the two never
+    # share one ai_runs row.
+    source_suffix = "::WOOTZ" if str(payload.get("source") or "").strip() == "wootzcheckin" else ""
+
     if ingest_only and media_only:
-        return f"{primary_id}::MEDIA_V1"
+        return f"{primary_id}::MEDIA_V1{source_suffix}"
     if ingest_only:
-        return f"{primary_id}::INGEST_V1"
+        return f"{primary_id}::INGEST_V1{source_suffix}"
 
     # Keep default behavior for normal events
-    return primary_id
+    return f"{primary_id}{source_suffix}"
+
+
+def _reply_already_written(settings: Settings, state: Dict[str, Any]) -> bool:
+    """
+    True when ZAI already replied to this check-in. Used so a repeated CHECKIN_CREATED (bot retry, replay,
+    backfill) does not post a second reply. Fails open: if the lookup itself fails, the reply goes ahead.
+    """
+    checkin_id = str(state.get("checkin_id") or "").strip()
+    if not checkin_id or not settings.database_url:
+        return False
+    try:
+        from ..tools.db_tool import DBTool
+        return DBTool(settings.database_url).has_ai_reply_for_checkin(checkin_id)
+    except Exception as e:
+        logger.warning("reply-already-written lookup failed (continuing): %s", e)
+        return False
 
 def run_event_graph(settings: Settings, payload: Dict[str, Any]) -> Dict[str, Any]:
     event_type = str(payload.get("event_type") or "UNKNOWN").strip()
@@ -518,6 +539,21 @@ def run_event_graph(settings: Settings, payload: Dict[str, Any]) -> Dict[str, An
                     "primary_id": primary_id,
                     "event_type": event_type,
                     "note": "Non-created event: vectors refreshed, no reply/writeback.",
+                    "logs": state.get("logs"),
+                }
+
+            # One reply per check-in. An explicit replay (force_reply / bypass_idempotency) is still allowed.
+            if not (_truthy(m.get("force_reply")) or _truthy(m.get("bypass_idempotency"))) and _reply_already_written(settings, state):
+                (state.get("logs") or []).append("reply already written for this check-in; skipping reply/writeback")
+                logger.info("Skipping reply: already replied. primary_id=%s", primary_id)
+                state = _timed("upsert_vectors", upsert_vectors)
+                runlog.success(run_id)
+                return {
+                    "run_id": run_id,
+                    "ok": True,
+                    "primary_id": primary_id,
+                    "event_type": event_type,
+                    "note": "Reply already written; vectors refreshed, no new reply.",
                     "logs": state.get("logs"),
                 }
 
