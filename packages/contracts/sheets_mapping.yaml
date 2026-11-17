@@ -76,5 +76,5 @@ writeback:
       status: "Status"
       added_by: "Added by"
       timestamp: "Timestamp"
-    remark_prefix: "[ZAI] "
+    remark_prefix: ""
     default_status_from_checkin: true

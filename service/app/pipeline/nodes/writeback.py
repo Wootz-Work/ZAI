@@ -176,7 +176,7 @@ def writeback(settings: Settings, state: Dict[str, Any]) -> Dict[str, Any]:
         key_col: conversation_id,
         "CheckIn ID": checkin_id,
         "Photo": photos_cell,
-        "Remarks": "[ZAI] " + reply_for_sheet,
+        "Remarks": reply_for_sheet,
         "Status": state.get("checkin_status") or "",
         "Added by": added_by,
         "Timestamp": ts,
